@@ -275,3 +275,18 @@ def forecast_with_lags(df, origin, target_dates, model="poisson", k=FOURIER_K):
         rows.append({"Date": d, "h": h,
                      model: fit_predict(X[ok], y[ok], X.loc[idx], model)[0]})
     return pd.DataFrame(rows)
+
+
+def conformal_bounds(scores, coverage=0.8):
+    """Two-sided split-conformal bounds from n exchangeable scores.
+
+    Uses the floor((n + 1) * a)-th and ceil((n + 1) * (1 - a))-th order statistics,
+    with a = (1 - coverage) / 2, which give at least the nominal coverage for a new
+    exchangeable score (Vovk et al., 2005). Returns -inf or inf where n is too
+    small for the requested coverage.
+    """
+    s = np.sort(np.asarray(scores, dtype=float))
+    n, a = len(s), (1 - coverage) / 2
+    # Rounding guards against (1 - 0.8) / 2 evaluating to 0.0999...
+    lo, hi = int(np.floor(round((n + 1) * a, 9))), int(np.ceil(round((n + 1) * (1 - a), 9)))
+    return (s[lo - 1] if lo >= 1 else -np.inf), (s[hi - 1] if hi <= n else np.inf)

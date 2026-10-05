@@ -126,3 +126,9 @@ def test_yearly_naive_scales_last_year_by_level_change():
     train = df[df["Date"] <= "2025-06-30"].dropna(subset=["y"])
     target = pd.date_range("2025-08-04", periods=7, freq="D")
     np.testing.assert_allclose(tfl.yearly_naive(train, target), 1200 * WEEKLY, rtol=0.08)
+
+
+def test_conformal_bounds_order_statistics():
+    assert tfl.conformal_bounds(range(1, 13), 0.8) == (1, 12)     # n = 12: min and max
+    assert tfl.conformal_bounds(range(1, 20), 0.8) == (2, 18)
+    assert tfl.conformal_bounds(range(1, 4), 0.8) == (-np.inf, np.inf)
