@@ -38,6 +38,13 @@ def test_build_series_masks_strike_and_disruption_but_not_holidays():
     assert df.loc["2024-12-25", "IsHoliday"] and df.loc["2024-12-25", "y"] == 50
 
 
+def test_build_series_masks_zero_counts_on_holidays():
+    counts = synthetic_counts()
+    counts.loc[counts["TravelDate"] == "2024-05-27", "EntryTapCount"] = 0
+    df = tfl.build_series(counts, "A").set_index("Date")
+    assert df.loc["2024-05-27", "IsHoliday"] and np.isnan(df.loc["2024-05-27", "y"])
+
+
 def test_build_series_unknown_station():
     with pytest.raises(KeyError):
         tfl.build_series(synthetic_counts(), "B")

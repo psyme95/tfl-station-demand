@@ -86,8 +86,11 @@ def build_series(counts, station, extend_to=None):
         ((df["Date"].dt.month == 12) & (df["Date"].dt.day >= 23))
         | ((df["Date"].dt.month == 1) & (df["Date"].dt.day <= 2))
     )
+    # Bank holidays are exempt from the ratio test because their low demand is
+    # real, but a day with no entries at all is a closure whatever the date.
     df["IsDisrupted"] = (
-        ~df["DowRatio"].between(DISRUPT_LO, DISRUPT_HI) & ~df["IsHoliday"]
+        (~df["DowRatio"].between(DISRUPT_LO, DISRUPT_HI) & ~df["IsHoliday"])
+        | (df["Entries"] == 0)
     ).fillna(False)
 
     df["y"] = df["Entries"]
