@@ -1,4 +1,4 @@
-"""Data preparation, calendar features, models and backtesting for the forecasting notebook."""
+"""Shared code for the clustering and forecasting notebooks."""
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import PoissonRegressor, Ridge
@@ -34,6 +34,25 @@ DISRUPT_LO, DISRUPT_HI = 0.25, 1.75
 FOURIER_K = 2
 ALPHA = 1.0
 MODEL_NAMES = ["naive", "poisson", "lognormal", "xgb"]
+
+
+CLUSTER_ORDER = ["Weekday commuter stations", "Low volume stations",
+                 "Consistent high-volume stations"]
+
+
+def name_clusters(centres):
+    """Map k = 3 cluster labels to names using their centroids.
+
+    k-means label numbers are arbitrary and can change between library versions,
+    so names are assigned from the centroid profile: the cluster with the highest
+    weekday-to-weekend balance is the commuter group, and of the other two the
+    larger by volume is the high-volume group.
+    """
+    commuter = centres["WeekdayWeekendBalance"].idxmax()
+    rest = centres.drop(commuter)
+    high = rest["LogMeanEntryCount"].idxmax()
+    low = rest.index.drop(high)[0]
+    return {commuter: CLUSTER_ORDER[0], low: CLUSTER_ORDER[1], high: CLUSTER_ORDER[2]}
 
 
 def load_counts(path):

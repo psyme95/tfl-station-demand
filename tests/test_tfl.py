@@ -75,3 +75,13 @@ def test_backtest_origins_respect_gap_and_training_length():
     assert ((origins - df["Date"].min()).days >= 240).all()
     assert origins.max() + pd.Timedelta(days=58 + 30) <= df["Date"].max() + pd.Timedelta(days=1)
     assert set(bt["model"]) == {"naive", "poisson"}
+
+
+def test_name_clusters_ignores_label_order():
+    centres = pd.DataFrame({"LogMeanEntryCount": [0.7, -0.1, -0.6],
+                            "WeekdayWeekendBalance": [-0.6, 1.5, 0.2]})
+    names = tfl.name_clusters(centres)
+    assert names == {1: "Weekday commuter stations", 2: "Low volume stations",
+                     0: "Consistent high-volume stations"}
+    shuffled = centres.iloc[[2, 0, 1]].reset_index(drop=True)
+    assert tfl.name_clusters(shuffled)[2] == "Weekday commuter stations"
