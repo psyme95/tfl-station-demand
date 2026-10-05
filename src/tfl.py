@@ -32,7 +32,6 @@ BANK_HOLIDAYS = pd.to_datetime([
 DISRUPT_LO, DISRUPT_HI = 0.25, 1.75
 
 FOURIER_K = 2
-ALPHA = 1.0
 MODEL_NAMES = ["naive", "poisson", "lognormal", "xgb"]
 
 
@@ -117,15 +116,17 @@ def features_for(df, k=FOURIER_K):
                              df["IsHoliday"], df["IsXmas"], k)
 
 
-def fit_predict(X_train, y_train, X_future, model, alpha=ALPHA):
+def fit_predict(X_train, y_train, X_future, model):
     if model == "poisson":
+        # Unpenalised: with daily counts in the thousands, an L2 penalty of order 1
+        # is negligible against the deviance. Scaling only helps the solver.
         m = make_pipeline(StandardScaler(),
-                          PoissonRegressor(alpha=alpha, max_iter=5000))
+                          PoissonRegressor(alpha=0.0, max_iter=5000))
         m.fit(X_train, y_train)
         return m.predict(X_future)
 
     if model == "lognormal":
-        m = make_pipeline(StandardScaler(), Ridge(alpha=alpha))
+        m = make_pipeline(StandardScaler(), Ridge(alpha=1.0))
         m.fit(X_train, np.log(y_train))
         smear = np.mean(np.exp(np.log(y_train) - m.predict(X_train)))   # Duan (1983)
         return np.exp(m.predict(X_future)) * smear
