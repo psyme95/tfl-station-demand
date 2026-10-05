@@ -207,20 +207,24 @@ def forecast(df, origin, target_dates, k=FOURIER_K, models=MODEL_NAMES[2:], xgb_
 def rolling_backtest(df, gap_days, n_origins=10, step_days=30, horizon=30,
                      min_train_days=240, k=FOURIER_K, models=MODEL_NAMES[2:],
                      xgb_params=None):
-    """Walk-forward origins, each forecasting `horizon` days starting `gap_days` ahead."""
+    """Walk-forward origins, each forecasting `horizon` days starting `gap_days` ahead.
+
+    `mae` is scored on undisrupted days only. Because the disruption filter is
+    defined using the actual values, `mae_all` is also reported on every observed
+    day outside the strike week.
+    """
     last, first = df["Date"].max(), df["Date"].min()
     latest = last - pd.Timedelta(days=gap_days + horizon)
     origins = [latest - pd.Timedelta(days=step_days * i) for i in range(n_origins)]
     origins = [o for o in origins if (o - first).days >= min_train_days][::-1]
 
-    # MASE scale: in-sample seasonal naive (lag 7) error
-    scale = df.set_index("Date")["y"].diff(7).abs().mean()
-
     rows = []
     for o in origins:
         tgt = pd.date_range(o + pd.Timedelta(days=gap_days), periods=horizon, freq="D")
         pred = forecast(df, o, tgt, k, models, xgb_params)
-        actual = mask_disruptions(df, o).set_index("Date")["y"].reindex(tgt).values
+        masked = mask_disruptions(df, o).set_index("Date").reindex(tgt)
+        actual = masked["y"].values
+        observed = masked["Entries"].where(~masked["IsStrike"]).values
 
         for m in ["naive", "yearly", *models]:
             e = actual - pred[m].values
@@ -228,7 +232,8 @@ def rolling_backtest(df, gap_days, n_origins=10, step_days=30, horizon=30,
             rows.append({
                 "origin": o, "model": m,
                 "mae": np.abs(e[ok]).mean(),
-                "mase": np.abs(e[ok]).mean() / scale,
+                "mae_all": np.nanmean(np.abs(observed - pred[m].values)),
+                "n_excluded": int(np.sum(~np.isnan(observed) & np.isnan(actual))),
                 "bias": e[ok].mean() / actual[ok].mean(),
                 "log_resid": np.log(actual[ok] / pred[m].values[ok]),
                 "total_ratio": actual[ok].sum() / pred[m].values[ok].sum(),
