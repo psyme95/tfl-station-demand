@@ -105,3 +105,14 @@ def test_mask_ignores_data_after_fit_end():
     before = masked["Date"] <= origin
     pd.testing.assert_series_equal(masked.loc[before, "IsDisrupted"].reset_index(drop=True),
                                    truncated["IsDisrupted"], check_names=False)
+
+
+@pytest.mark.parametrize("h", [1, 10, 58])
+def test_lag_features_use_no_future_values(h):
+    df = tfl.build_series(synthetic_counts(), "A")
+    origin = pd.Timestamp("2025-03-01")
+    df.loc[df["Date"] == origin, "y"] = np.nan             # a masked origin day
+    changed = df.copy()
+    changed.loc[changed["Date"] > origin, "y"] *= 5
+    upto = df["Date"] <= origin + pd.Timedelta(days=h)
+    pd.testing.assert_frame_equal(tfl.lag_features(df, h)[upto], tfl.lag_features(changed, h)[upto])

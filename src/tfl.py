@@ -214,8 +214,12 @@ def rolling_backtest(df, gap_days, n_origins=10, step_days=30, horizon=30,
 
 
 def lag_features(df, h):
-    """Lags for a forecast h days ahead. Masked predictor values are interpolated."""
-    logy = np.log(df["y"]).interpolate(limit_direction="both")
+    """Lags for a forecast h days ahead.
+
+    Masked days are filled forwards with the last observed value. Interpolation
+    would borrow values from after a masked day, which can lie beyond the origin.
+    """
+    logy = np.log(df["y"]).ffill()
     same_dow = 7 * int(np.ceil(h / 7))          # most recent matching weekday
 
     return pd.DataFrame({
