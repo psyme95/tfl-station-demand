@@ -76,12 +76,12 @@ def test_poisson_recovers_weekly_pattern():
 
 def test_backtest_origins_respect_gap_and_training_length():
     df = tfl.build_series(synthetic_counts(), "A")
-    bt = tfl.rolling_backtest(df, gap_days=58, n_origins=10, min_train_days=240,
+    bt = tfl.rolling_backtest(df, gap_days=58, n_origins=12, step_days=15, min_train_days=365,
                               models=["poisson"])
     origins = pd.to_datetime(bt["origin"].unique())
-    assert ((origins - df["Date"].min()).days >= 240).all()
+    assert ((origins - df["Date"].min()).days >= 365).all()
     assert origins.max() + pd.Timedelta(days=58 + 30) <= df["Date"].max() + pd.Timedelta(days=1)
-    assert set(bt["model"]) == {"naive", "poisson"}
+    assert set(bt["model"]) == {"naive", "yearly", "poisson"}
 
 
 def test_name_clusters_ignores_label_order():
@@ -116,3 +116,13 @@ def test_lag_features_use_no_future_values(h):
     changed.loc[changed["Date"] > origin, "y"] *= 5
     upto = df["Date"] <= origin + pd.Timedelta(days=h)
     pd.testing.assert_frame_equal(tfl.lag_features(df, h)[upto], tfl.lag_features(changed, h)[upto])
+
+
+def test_yearly_naive_scales_last_year_by_level_change():
+    counts = synthetic_counts()
+    growth = np.where(counts["TravelDate"] >= "2025-01-01", 1.2, 1.0)
+    counts["EntryTapCount"] = (counts["EntryTapCount"] * growth).round()
+    df = tfl.build_series(counts, "A")
+    train = df[df["Date"] <= "2025-06-30"].dropna(subset=["y"])
+    target = pd.date_range("2025-08-04", periods=7, freq="D")
+    np.testing.assert_allclose(tfl.yearly_naive(train, target), 1200 * WEEKLY, rtol=0.08)

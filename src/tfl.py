@@ -38,7 +38,8 @@ XGB_PARAMS = dict(objective="count:poisson", max_delta_step=0.7,
                   n_estimators=400, learning_rate=0.05, max_depth=4,
                   min_child_weight=1, subsample=0.9, colsample_bytree=0.9,
                   random_state=0, verbosity=0)
-MODEL_NAMES = ["naive", "poisson", "lognormal", "xgb"]
+# Two baselines followed by the fitted models.
+MODEL_NAMES = ["naive", "yearly", "poisson", "lognormal", "xgb"]
 
 
 CLUSTER_ORDER = ["Weekday commuter stations", "Low volume stations",
@@ -167,8 +168,25 @@ def seasonal_naive(train, target_dates, weeks=8):
     return pd.Series(target_dates.dayofweek).map(by_dow).values
 
 
-def forecast(df, origin, target_dates, k=FOURIER_K, models=MODEL_NAMES[1:], xgb_params=None):
-    """Seasonal naive plus `models`, trained up to origin.
+def yearly_naive(train, target_dates, weeks=8):
+    """The same weekday 364 days earlier, scaled by the year-on-year change in level.
+
+    The level ratio compares the last `weeks` weeks of training data with the same
+    weeks a year before. Masked days a year earlier are filled with the mean for
+    that weekday over the year-earlier target window.
+    """
+    y = train.set_index("Date")["y"]
+    end = train["Date"].max()
+    recent = y[end - pd.Timedelta(weeks=weeks) + pd.Timedelta(days=1):]
+    ratio = recent.mean() / y.reindex(recent.index - pd.Timedelta(days=364)).mean()
+
+    last_year = y.reindex(target_dates - pd.Timedelta(days=364))
+    last_year = last_year.fillna(last_year.groupby(last_year.index.dayofweek).transform("mean"))
+    return last_year.values * ratio
+
+
+def forecast(df, origin, target_dates, k=FOURIER_K, models=MODEL_NAMES[2:], xgb_params=None):
+    """Both baselines plus `models`, trained up to origin.
 
     Calendar features need one fit for every horizon.
     """
@@ -179,6 +197,7 @@ def forecast(df, origin, target_dates, k=FOURIER_K, models=MODEL_NAMES[1:], xgb_
 
     out = pd.DataFrame({"Date": df.loc[is_future, "Date"].values})
     out["naive"] = seasonal_naive(df[is_train], pd.DatetimeIndex(out["Date"]))
+    out["yearly"] = yearly_naive(df[is_train], pd.DatetimeIndex(out["Date"]))
     for m in models:
         out[m] = fit_predict(X[is_train], df["y"].values[is_train],
                              X[is_future], m, xgb_params)
@@ -186,7 +205,7 @@ def forecast(df, origin, target_dates, k=FOURIER_K, models=MODEL_NAMES[1:], xgb_
 
 
 def rolling_backtest(df, gap_days, n_origins=10, step_days=30, horizon=30,
-                     min_train_days=240, k=FOURIER_K, models=MODEL_NAMES[1:],
+                     min_train_days=240, k=FOURIER_K, models=MODEL_NAMES[2:],
                      xgb_params=None):
     """Walk-forward origins, each forecasting `horizon` days starting `gap_days` ahead."""
     last, first = df["Date"].max(), df["Date"].min()
@@ -203,7 +222,7 @@ def rolling_backtest(df, gap_days, n_origins=10, step_days=30, horizon=30,
         pred = forecast(df, o, tgt, k, models, xgb_params)
         actual = mask_disruptions(df, o).set_index("Date")["y"].reindex(tgt).values
 
-        for m in ["naive", *models]:
+        for m in ["naive", "yearly", *models]:
             e = actual - pred[m].values
             ok = ~np.isnan(e)
             rows.append({
