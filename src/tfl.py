@@ -32,6 +32,12 @@ BANK_HOLIDAYS = pd.to_datetime([
 DISRUPT_LO, DISRUPT_HI = 0.25, 1.75
 
 FOURIER_K = 2
+
+# max_delta_step caps each leaf update, as recommended for the Poisson objective.
+XGB_PARAMS = dict(objective="count:poisson", max_delta_step=0.7,
+                  n_estimators=400, learning_rate=0.05, max_depth=4,
+                  min_child_weight=1, subsample=0.9, colsample_bytree=0.9,
+                  random_state=0, verbosity=0)
 MODEL_NAMES = ["naive", "poisson", "lognormal", "xgb"]
 
 
@@ -131,7 +137,7 @@ def features_for(df, k=FOURIER_K):
                              df["IsHoliday"], df["IsXmas"], k)
 
 
-def fit_predict(X_train, y_train, X_future, model):
+def fit_predict(X_train, y_train, X_future, model, xgb_params=None):
     if model == "poisson":
         # Unpenalised: with daily counts in the thousands, an L2 penalty of order 1
         # is negligible against the deviance. Scaling only helps the solver.
@@ -147,10 +153,7 @@ def fit_predict(X_train, y_train, X_future, model):
         return np.exp(m.predict(X_future)) * smear
 
     if model == "xgb":
-        m = XGBRegressor(objective="count:poisson", max_delta_step=0.7,
-                         n_estimators=400, learning_rate=0.05, max_depth=4,
-                         subsample=0.9, colsample_bytree=0.9,
-                         random_state=0, verbosity=0)
+        m = XGBRegressor(**{**XGB_PARAMS, **(xgb_params or {})})
         m.fit(X_train, y_train)
         return m.predict(X_future)
 
@@ -164,7 +167,7 @@ def seasonal_naive(train, target_dates, weeks=8):
     return pd.Series(target_dates.dayofweek).map(by_dow).values
 
 
-def forecast(df, origin, target_dates, k=FOURIER_K, models=MODEL_NAMES[1:]):
+def forecast(df, origin, target_dates, k=FOURIER_K, models=MODEL_NAMES[1:], xgb_params=None):
     """Seasonal naive plus `models`, trained up to origin.
 
     Calendar features need one fit for every horizon.
@@ -178,12 +181,13 @@ def forecast(df, origin, target_dates, k=FOURIER_K, models=MODEL_NAMES[1:]):
     out["naive"] = seasonal_naive(df[is_train], pd.DatetimeIndex(out["Date"]))
     for m in models:
         out[m] = fit_predict(X[is_train], df["y"].values[is_train],
-                             X[is_future], m)
+                             X[is_future], m, xgb_params)
     return out
 
 
 def rolling_backtest(df, gap_days, n_origins=10, step_days=30, horizon=30,
-                     min_train_days=240, k=FOURIER_K, models=MODEL_NAMES[1:]):
+                     min_train_days=240, k=FOURIER_K, models=MODEL_NAMES[1:],
+                     xgb_params=None):
     """Walk-forward origins, each forecasting `horizon` days starting `gap_days` ahead."""
     last, first = df["Date"].max(), df["Date"].min()
     latest = last - pd.Timedelta(days=gap_days + horizon)
@@ -196,7 +200,7 @@ def rolling_backtest(df, gap_days, n_origins=10, step_days=30, horizon=30,
     rows = []
     for o in origins:
         tgt = pd.date_range(o + pd.Timedelta(days=gap_days), periods=horizon, freq="D")
-        pred = forecast(df, o, tgt, k, models)
+        pred = forecast(df, o, tgt, k, models, xgb_params)
         actual = mask_disruptions(df, o).set_index("Date")["y"].reindex(tgt).values
 
         for m in ["naive", *models]:
