@@ -75,17 +75,29 @@ def build_series(counts, station, extend_to=None):
     df = pd.DataFrame({"Date": dates})
     df["Entries"] = one["EntryTapCount"].reindex(dates).values
 
-    # The median, unlike the mean, is not pulled towards the disrupted days
-    # that the ratio is meant to find.
-    dow_median = df.groupby(df["Date"].dt.dayofweek)["Entries"].transform("median")
-    df["DowRatio"] = df["Entries"] / dow_median
-
     df["IsStrike"] = df["Date"].between(*STRIKE)
     df["IsHoliday"] = df["Date"].isin(BANK_HOLIDAYS)
     df["IsXmas"] = (
         ((df["Date"].dt.month == 12) & (df["Date"].dt.day >= 23))
         | ((df["Date"].dt.month == 1) & (df["Date"].dt.day <= 2))
     )
+    df = mask_disruptions(df)
+    return df.reset_index(drop=True)
+
+
+def mask_disruptions(df, fit_end=None):
+    """Flag disrupted days and set y, using weekday medians from data up to fit_end.
+
+    Restricting the medians to data up to the forecast origin keeps the training
+    mask free of information from after the origin.
+    """
+    df = df.copy()
+    ref = df if fit_end is None else df[df["Date"] <= fit_end]
+    # The median, unlike the mean, is not pulled towards the disrupted days
+    # that the ratio is meant to find.
+    dow_median = ref.groupby(ref["Date"].dt.dayofweek)["Entries"].median()
+    df["DowRatio"] = df["Entries"] / df["Date"].dt.dayofweek.map(dow_median).values
+
     # Bank holidays are exempt from the ratio test because their low demand is
     # real, but a day with no entries at all is a closure whatever the date.
     df["IsDisrupted"] = (
@@ -95,7 +107,7 @@ def build_series(counts, station, extend_to=None):
 
     df["y"] = df["Entries"]
     df.loc[df["IsStrike"] | df["IsDisrupted"], "y"] = np.nan
-    return df.reset_index(drop=True)
+    return df
 
 
 def calendar_features(dates, holiday, xmas, k=FOURIER_K):
@@ -157,6 +169,7 @@ def forecast(df, origin, target_dates, k=FOURIER_K, models=MODEL_NAMES[1:]):
 
     Calendar features need one fit for every horizon.
     """
+    df = mask_disruptions(df, origin)
     X = features_for(df, k)
     is_train = (df["Date"] <= origin).values & df["y"].notna().values
     is_future = df["Date"].isin(target_dates).values
@@ -184,7 +197,7 @@ def rolling_backtest(df, gap_days, n_origins=10, step_days=30, horizon=30,
     for o in origins:
         tgt = pd.date_range(o + pd.Timedelta(days=gap_days), periods=horizon, freq="D")
         pred = forecast(df, o, tgt, k, models)
-        actual = df.set_index("Date")["y"].reindex(tgt).values
+        actual = mask_disruptions(df, o).set_index("Date")["y"].reindex(tgt).values
 
         for m in ["naive", *models]:
             e = actual - pred[m].values
@@ -214,6 +227,7 @@ def lag_features(df, h):
 
 def forecast_with_lags(df, origin, target_dates, model="poisson", k=FOURIER_K):
     """Direct multi-step: one fit per horizon, using only lags observed at the origin."""
+    df = mask_disruptions(df, origin)
     Xcal = features_for(df, k)
     y = df["y"].values
     is_train = (df["Date"] <= origin).values & df["y"].notna().values

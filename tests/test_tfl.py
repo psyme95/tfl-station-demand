@@ -92,3 +92,16 @@ def test_name_clusters_ignores_label_order():
                      0: "Consistent high-volume stations"}
     shuffled = centres.iloc[[2, 0, 1]].reset_index(drop=True)
     assert tfl.name_clusters(shuffled)[2] == "Weekday commuter stations"
+
+
+def test_mask_ignores_data_after_fit_end():
+    counts = synthetic_counts()
+    later = counts["TravelDate"] > "2025-03-01"
+    counts.loc[later, "EntryTapCount"] *= 3              # a level shift after the origin
+    df = tfl.build_series(counts, "A")
+    origin = pd.Timestamp("2025-03-01")
+    masked = tfl.mask_disruptions(df, origin)
+    truncated = tfl.build_series(counts[~later], "A")
+    before = masked["Date"] <= origin
+    pd.testing.assert_series_equal(masked.loc[before, "IsDisrupted"].reset_index(drop=True),
+                                   truncated["IsDisrupted"], check_names=False)
